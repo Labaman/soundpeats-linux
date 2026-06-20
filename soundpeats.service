@@ -10,6 +10,9 @@ Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus
 # specific device (if several QCY/SoundPeats are around) with its control
 # address (see the Detect/Scan methods):
 # Environment=SOUNDPEATS_DEVICE=AA:BB:CC:DD:EE:FF
+# On connect the device is shown in Bluetooth UIs as "SoundPeats BLE control";
+# override the name, or leave empty to disable, with:
+# Environment=SOUNDPEATS_ALIAS=My Earbuds
 
 [Install]
 WantedBy=default.target

@@ -39,6 +39,10 @@ its address to `Connect` (`string:"AA:BB:CC:DD:EE:FF"`) or by setting
 `soundpeats.service`). Use `Detect` to print the auto-detected address, or `Scan` to list
 all advertising BLE devices.
 
+On connect the device is given a friendly BlueZ alias so it shows up in Bluetooth UIs as
+**SoundPeats BLE control** instead of the raw advertised `QCY-APP`. Override the name with
+`SOUNDPEATS_ALIAS=My Earbuds`, or set it empty to leave the name untouched.
+
 #### get battery level
 
 ```bash

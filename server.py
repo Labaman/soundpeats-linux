@@ -8,7 +8,7 @@ import binascii
 import logging
 from dbus_next.aio import MessageBus
 from dbus_next.service import ServiceInterface, method
-from dbus_next import Variant
+from dbus_next import Variant, BusType
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -22,6 +22,9 @@ CONTROL_SERVICE_UUID = "0000a001-0000-1000-8000-00805f9b34fb"
 # SoundPeats and shares firmware). NB: not "soundpeats" — that name belongs to
 # the *classic audio* device, which is not the BLE control endpoint.
 NAME_HINTS = ("qcy",)
+# Friendly BlueZ alias set on connect so the control endpoint shows up nicely in
+# Bluetooth UIs instead of the raw advertised "QCY-APP". Empty disables it.
+ALIAS = os.environ.get("SOUNDPEATS_ALIAS", "SoundPeats BLE control")
 
 
 class CommandsEnum(enum.IntEnum):
@@ -95,6 +98,47 @@ async def discover_earbuds(address=None, timeout=10.0):
     pool = service_matches or matches
     device, _, _ = max(pool.values(), key=lambda m: m[1])
     return device
+
+
+async def set_bluez_alias(address, alias):
+    """Best-effort: give the device a friendly BlueZ alias by address, so it
+    shows up as e.g. "SoundPeats BLE control" instead of the raw "QCY-APP".
+
+    Purely cosmetic and local; never fatal if it fails (e.g. polkit denies it).
+    """
+    bus = None
+    try:
+        bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+        intro = await bus.introspect("org.bluez", "/")
+        manager = bus.get_proxy_object("org.bluez", "/", intro).get_interface(
+            "org.freedesktop.DBus.ObjectManager"
+        )
+        objects = await manager.call_get_managed_objects()
+        path = next(
+            (
+                p
+                for p, ifaces in objects.items()
+                if "org.bluez.Device1" in ifaces
+                and ifaces["org.bluez.Device1"].get("Address")
+                and ifaces["org.bluez.Device1"]["Address"].value.casefold()
+                == address.casefold()
+            ),
+            None,
+        )
+        if path is None:
+            return
+        dintro = await bus.introspect("org.bluez", path)
+        device = bus.get_proxy_object("org.bluez", path, dintro).get_interface(
+            "org.bluez.Device1"
+        )
+        if await device.get_alias() != alias:
+            await device.set_alias(alias)
+            logger.info("Set BlueZ alias of %s to %r", address, alias)
+    except Exception as e:
+        logger.warning("Could not set BlueZ alias: %s", e)
+    finally:
+        if bus is not None:
+            bus.disconnect()
 
 
 def pack_data_to_send(*bArr):
@@ -204,6 +248,8 @@ class BLEService(ServiceInterface):
                 if client.is_connected:
                     self.client = client  # publish only once fully connected
                     logger.info(f"Connected: {client}")
+                    if ALIAS:
+                        await set_bluez_alias(self.device_address, ALIAS)
                     return True
             except Exception as e:
                 logger.error(f"Connection failed: {e}")
