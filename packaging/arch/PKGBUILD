@@ -1,6 +1,6 @@
 # Maintainer: Mikhail Velichko <efklid@gmail.com>
 pkgname=soundpeats-linux-git
-pkgver=r17.7eac2cc
+pkgver=r18.77e4c08
 pkgrel=1
 pkgdesc="D-Bus BLE daemon to control SoundPeats Capsule3 Pro (battery, ANC modes) on Linux"
 arch=('any')

@@ -19,9 +19,18 @@ cp soundpeats.service ~/.config/systemd/user/
 systemctl --user enable --now soundpeats.service
 ```
 
+#### scan (find your device)
+
+The BLE control endpoint advertises under a **different address than the paired audio
+MAC** shown by `bluetoothctl devices` (look for a `QCY-APP` entry). Scan to find it:
+
+```bash
+dbus-send --session --dest=tn.aziz.soundpeats.BLEService --print-reply /tn/aziz/soundpeats/BLEService tn.aziz.soundpeats.BLEService.Scan
+```
+
 #### connect
 
-Pass your earbuds' MAC address (find it with `bluetoothctl devices`):
+Pass the address found above:
 
 ```bash
 dbus-send --session --dest=tn.aziz.soundpeats.BLEService --print-reply /tn/aziz/soundpeats/BLEService tn.aziz.soundpeats.BLEService.Connect string:"AA:BB:CC:DD:EE:FF"

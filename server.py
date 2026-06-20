@@ -3,7 +3,7 @@ import asyncio
 import enum
 import os
 from typing import Any, Dict, List, Optional
-from bleak import BleakClient
+from bleak import BleakClient, BleakScanner
 import binascii
 import logging
 from dbus_next.aio import MessageBus
@@ -134,29 +134,45 @@ class BLEService(ServiceInterface):
         self.device_address = None
         self.loop = None
 
-    async def connect(self, address):
+    async def connect(self, address, retry_forever=False):
+        """Connect to a device.
+
+        With retry_forever=True keep retrying every 5s (used for startup
+        auto-connect and background reconnects). Otherwise make a single attempt
+        and return whether it succeeded, so an explicit Connect call doesn't
+        block forever on an unreachable device.
+        """
         self.device_address = address
         self.loop = asyncio.get_running_loop()
         while True:
             try:
                 logger.info(f"Connecting to device: {address}")
+                # Resolve the advertising device first (the recommended bleak
+                # pattern): connecting to a bare address makes connect() do its
+                # own discovery, which is slow and flaky.
+                device = await BleakScanner.find_device_by_address(address, timeout=10.0)
+                if device is None:
+                    raise Exception(f"{address} not found (not advertising BLE)")
                 self.client = BleakClient(
-                    address, disconnected_callback=self.on_disconnect
+                    device, disconnected_callback=self.on_disconnect
                 )
                 await self.client.connect()
                 if self.client.is_connected:
                     logger.info(f"Connected: {self.client}")
-                    break
+                    return True
             except Exception as e:
                 logger.error(f"Connection failed: {e}")
-                await asyncio.sleep(5)
+                self.client = None
+            if not retry_forever:
+                return False
+            await asyncio.sleep(5)
 
     def on_disconnect(self, client):
         logger.warning("Disconnected from device, attempting to reconnect...")
         if self.reconnect_task is None or self.reconnect_task.done():
             loop = self.loop or asyncio.get_event_loop()
             self.reconnect_task = asyncio.run_coroutine_threadsafe(
-                self.connect(self.device_address), loop
+                self.connect(self.device_address, retry_forever=True), loop
             )
 
     async def disconnect(self):
@@ -164,9 +180,24 @@ class BLEService(ServiceInterface):
             await self.client.disconnect()
             logger.info("Disconnected")
 
-    async def explore_services(self):
-        if not self.client:
+    def _ensure_connected(self):
+        if not self.client or not self.client.is_connected:
             raise Exception("Not connected to any device")
+
+    async def scan(self, timeout=8.0):
+        devices = {}
+
+        def callback(device, adv):
+            devices[device.address] = f"{device.name or '?'} (rssi {adv.rssi})"
+
+        scanner = BleakScanner(detection_callback=callback)
+        await scanner.start()
+        await asyncio.sleep(timeout)
+        await scanner.stop()
+        return devices
+
+    async def explore_services(self):
+        self._ensure_connected()
         for service in self.client.services:
             logger.info("[Service] %s", service)
             for char in service.characteristics:
@@ -196,8 +227,7 @@ class BLEService(ServiceInterface):
                         logger.error("    [Descriptor] %s, Error: %s", descriptor, e)
 
     async def battery_level(self):
-        if not self.client:
-            raise Exception("Not connected to any device")
+        self._ensure_connected()
         uuid = "00000008-0000-1000-8000-00805f9b34fb"
         out = await self.client.read_gatt_char(uuid)
         logger.info(f"Received: {out}, {binascii.hexlify(out)}")
@@ -207,8 +237,7 @@ class BLEService(ServiceInterface):
         }
 
     async def get_firmware_version(self):
-        if not self.client:
-            raise Exception("Not connected to any device")
+        self._ensure_connected()
         uuid = "00000007-0000-1000-8000-00805f9b34fb"
         service = await get_service(self.client)
         char = service.get_characteristic(uuid)
@@ -220,8 +249,7 @@ class BLEService(ServiceInterface):
         return out.decode()
 
     async def read_earbud_setting(self):
-        if not self.client:
-            raise Exception("Not connected to any device")
+        self._ensure_connected()
         uuid = "00001002-0000-1000-8000-00805f9b34fb"
         service = await get_service(self.client)
         char = service.get_characteristic(uuid)
@@ -243,8 +271,29 @@ class BLEService(ServiceInterface):
 
     @method()
     async def Connect(self, address: "s") -> "s":
-        await self.connect(address)
-        return "Connected"
+        # Connect in the background (retrying until the device is reachable) so
+        # the call never blocks forever. Wait briefly for a fast success;
+        # otherwise report that it's still connecting rather than hang past the
+        # D-Bus reply timeout. Poll GetBatteryLevel to confirm once connected.
+        if self.client and self.client.is_connected and self.device_address == address:
+            return "Connected"
+        self.device_address = address
+        if self.reconnect_task and not self.reconnect_task.done():
+            self.reconnect_task.cancel()
+        self.reconnect_task = asyncio.create_task(
+            self.connect(address, retry_forever=True)
+        )
+        await asyncio.wait({self.reconnect_task}, timeout=18)
+        if self.client and self.client.is_connected:
+            return "Connected"
+        return f"Still connecting to {address} in the background"
+
+    @method()
+    async def Scan(self) -> "a{ss}":
+        # Discover advertising BLE devices for a few seconds. Handy to find the
+        # earbuds' control endpoint, which advertises under a different address
+        # than the paired audio MAC (e.g. a "QCY-APP" entry).
+        return await self.scan()
 
     @method()
     async def Disconnect(self) -> "s":
@@ -281,8 +330,7 @@ class BLEService(ServiceInterface):
 
     @method()
     async def SetNoiseMode(self, mode: "s") -> "s":
-        if not self.client:
-            raise Exception("Not connected to any device")
+        self._ensure_connected()
         try:
             noise_mode = NoiseMode[mode.upper()]
         except KeyError:
@@ -304,7 +352,7 @@ async def main():
     address = os.environ.get("SOUNDPEATS_DEVICE")
     if address:
         logger.info("Auto-connecting to %s from $SOUNDPEATS_DEVICE", address)
-        asyncio.create_task(service.connect(address))
+        asyncio.create_task(service.connect(address, retry_forever=True))
 
     await asyncio.Future()
 

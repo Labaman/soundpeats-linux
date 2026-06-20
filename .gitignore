@@ -1,3 +1,12 @@
 re/*.apk
 re/*.txt
 re/*.cache
+
+__pycache__/
+*.pyc
+
+# makepkg build artifacts
+packaging/arch/pkg/
+packaging/arch/src/
+packaging/arch/soundpeats-linux/
+packaging/arch/*.pkg.tar.*
