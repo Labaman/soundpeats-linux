@@ -244,22 +244,23 @@ class BLEService(ServiceInterface):
                 logger.info("Looking for earbuds: %s", address or "(auto-detect)")
                 device = await discover_earbuds(address)
                 if device is None:
-                    raise Exception(
-                        f"{address} not found" if address else "no earbuds found"
+                    # Expected while the earbuds are in the case / out of range;
+                    # not an error, just keep looking.
+                    logger.info("Earbuds not in range yet")
+                else:
+                    self.device_address = device.address
+                    logger.info(f"Connecting to device: {device.address}")
+                    SERVICE = None  # invalidate cached service for the new connection
+                    client = BleakClient(
+                        device, disconnected_callback=self.on_disconnect
                     )
-                self.device_address = device.address
-                logger.info(f"Connecting to device: {device.address}")
-                SERVICE = None  # invalidate cached service for the new connection
-                client = BleakClient(
-                    device, disconnected_callback=self.on_disconnect
-                )
-                await client.connect()
-                if client.is_connected:
-                    self.client = client  # publish only once fully connected
-                    logger.info(f"Connected: {client}")
-                    if ALIAS:
-                        await set_bluez_alias(self.device_address, ALIAS)
-                    return True
+                    await client.connect()
+                    if client.is_connected:
+                        self.client = client  # publish only once fully connected
+                        logger.info(f"Connected: {client}")
+                        if ALIAS:
+                            await set_bluez_alias(self.device_address, ALIAS)
+                        return True
             except Exception as e:
                 logger.error(f"Connection failed: {e}")
             if not retry_forever:
@@ -267,11 +268,17 @@ class BLEService(ServiceInterface):
             await asyncio.sleep(5)
 
     def on_disconnect(self, client):
-        logger.warning("Disconnected from device, attempting to reconnect...")
+        # Called from a bleak callback; hop onto the loop so the reconnect runs
+        # as a real asyncio.Task (cancellable by/visible to Connect) instead of
+        # a cross-thread future.
+        loop = self.loop or asyncio.get_event_loop()
+        loop.call_soon_threadsafe(self._reconnect)
+
+    def _reconnect(self):
         if self.reconnect_task is None or self.reconnect_task.done():
-            loop = self.loop or asyncio.get_event_loop()
-            self.reconnect_task = asyncio.run_coroutine_threadsafe(
-                self.connect(self.device_address, retry_forever=True), loop
+            logger.warning("Disconnected from device, attempting to reconnect...")
+            self.reconnect_task = asyncio.create_task(
+                self.connect(self.device_address, retry_forever=True)
             )
 
     async def disconnect(self):
