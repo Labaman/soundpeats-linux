@@ -19,8 +19,9 @@ SERVICE = None
 # it, so we use it to auto-detect them without a preconfigured MAC address.
 CONTROL_SERVICE_UUID = "0000a001-0000-1000-8000-00805f9b34fb"
 # Fallback hint: the control endpoint advertises as e.g. "QCY-APP" (QCY makes
-# SoundPeats and shares firmware).
-NAME_HINTS = ("qcy", "soundpeats")
+# SoundPeats and shares firmware). NB: not "soundpeats" — that name belongs to
+# the *classic audio* device, which is not the BLE control endpoint.
+NAME_HINTS = ("qcy",)
 
 
 class CommandsEnum(enum.IntEnum):
@@ -68,17 +69,18 @@ async def discover_earbuds(address=None, timeout=10.0):
     strongest-signal device whose advertisement carries the vendor control
     service (or a QCY/SoundPeats name). Returns a BLEDevice, or None.
     """
-    matches = {}  # address -> (BLEDevice, rssi)
+    matches = {}  # address -> (BLEDevice, rssi, has_service)
 
     def callback(device, adv):
         if address is not None:
             if device.address.casefold() == address.casefold():
-                matches[device.address] = (device, adv.rssi)
+                matches[device.address] = (device, adv.rssi, True)
             return
         uuids = {u.casefold() for u in adv.service_uuids}
         name = (adv.local_name or device.name or "").casefold()
-        if CONTROL_SERVICE_UUID in uuids or any(h in name for h in NAME_HINTS):
-            matches[device.address] = (device, adv.rssi)
+        has_service = CONTROL_SERVICE_UUID in uuids
+        if has_service or any(h in name for h in NAME_HINTS):
+            matches[device.address] = (device, adv.rssi, has_service)
 
     scanner = BleakScanner(detection_callback=callback)
     await scanner.start()
@@ -86,7 +88,12 @@ async def discover_earbuds(address=None, timeout=10.0):
     await scanner.stop()
     if not matches:
         return None
-    device, _ = max(matches.values(), key=lambda m: m[1])
+    # Prefer devices actually advertising the control service (the classic audio
+    # device may match by name but isn't connectable over BLE GATT); among the
+    # pool, pick the strongest signal (closest device).
+    service_matches = {a: m for a, m in matches.items() if m[2]}
+    pool = service_matches or matches
+    device, _, _ = max(pool.values(), key=lambda m: m[1])
     return device
 
 
@@ -190,16 +197,16 @@ class BLEService(ServiceInterface):
                 self.device_address = device.address
                 logger.info(f"Connecting to device: {device.address}")
                 SERVICE = None  # invalidate cached service for the new connection
-                self.client = BleakClient(
+                client = BleakClient(
                     device, disconnected_callback=self.on_disconnect
                 )
-                await self.client.connect()
-                if self.client.is_connected:
-                    logger.info(f"Connected: {self.client}")
+                await client.connect()
+                if client.is_connected:
+                    self.client = client  # publish only once fully connected
+                    logger.info(f"Connected: {client}")
                     return True
             except Exception as e:
                 logger.error(f"Connection failed: {e}")
-                self.client = None
             if not retry_forever:
                 return False
             await asyncio.sleep(5)
@@ -399,7 +406,10 @@ async def main():
     # devices are around. Run as a background task so D-Bus stays responsive.
     address = os.environ.get("SOUNDPEATS_DEVICE") or None
     logger.info("Auto-connecting to %s", address or "(auto-detecting earbuds)")
-    asyncio.create_task(service.connect(address, retry_forever=True))
+    # Track the task so on_disconnect won't spawn a second, competing loop.
+    service.reconnect_task = asyncio.create_task(
+        service.connect(address, retry_forever=True)
+    )
 
     await asyncio.Future()
 
