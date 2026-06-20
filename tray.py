@@ -14,6 +14,9 @@ from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 DEST = "tn.aziz.soundpeats.BLEService"
 PATH = "/tn/aziz/soundpeats/BLEService"
 
+MODES = ("ANC", "PASSTHROUGH", "NORMAL")
+MODE_LABELS = {"ANC": "ANC", "PASSTHROUGH": "Прозрачность", "NORMAL": "Обычный"}
+
 
 def call(method, *args):
     cmd = [
@@ -52,9 +55,8 @@ class Tray(QSystemTrayIcon):
         self.status = menu.addAction("…")
         self.status.setEnabled(False)
         menu.addSeparator()
-        menu.addAction("ANC", lambda: self.set_mode("ANC"))
-        menu.addAction("Прозрачность", lambda: self.set_mode("PASSTHROUGH"))
-        menu.addAction("Обычный", lambda: self.set_mode("NORMAL"))
+        for mode in MODES:
+            menu.addAction(MODE_LABELS[mode], lambda _=False, m=mode: self.set_mode(m))
         menu.addSeparator()
         menu.addAction("Обновить", self.refresh)
         menu.addAction("Выход", QApplication.instance().quit)
@@ -62,6 +64,9 @@ class Tray(QSystemTrayIcon):
         # (manually popping it up fails on Wayland).
         menu.aboutToShow.connect(self.refresh)
         self.setContextMenu(menu)
+        # Left-click (Activate) cycles the noise mode; right-click is the menu.
+        self.mode_index = 0
+        self.activated.connect(self.on_activated)
         self.setToolTip("SoundPeats")
         self.setVisible(True)
 
@@ -70,8 +75,17 @@ class Tray(QSystemTrayIcon):
         timer.start(60_000)
         self.refresh()
 
+    def on_activated(self, reason):
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            self.mode_index = (self.mode_index + 1) % len(MODES)
+            self.set_mode(MODES[self.mode_index])
+
     def set_mode(self, mode):
+        if mode in MODES:
+            self.mode_index = MODES.index(mode)
         call("SetNoiseMode", f"string:{mode}")
+        self.showMessage("SoundPeats", MODE_LABELS.get(mode, mode),
+                         QSystemTrayIcon.MessageIcon.Information, 2000)
         self.refresh()
 
     def refresh(self):
