@@ -1,6 +1,6 @@
 pkgbase = soundpeats-linux-git
 	pkgdesc = D-Bus BLE daemon to control SoundPeats Capsule3 Pro (battery, ANC modes) on Linux
-	pkgver = r18.77e4c08
+	pkgver = r19.c78b492
 	pkgrel = 1
 	url = https://github.com/Labaman/soundpeats-linux
 	arch = any

@@ -19,25 +19,25 @@ cp soundpeats.service ~/.config/systemd/user/
 systemctl --user enable --now soundpeats.service
 ```
 
-#### scan (find your device)
-
-The BLE control endpoint advertises under a **different address than the paired audio
-MAC** shown by `bluetoothctl devices` (look for a `QCY-APP` entry). Scan to find it:
-
-```bash
-dbus-send --session --dest=tn.aziz.soundpeats.BLEService --print-reply /tn/aziz/soundpeats/BLEService tn.aziz.soundpeats.BLEService.Scan
-```
-
 #### connect
 
-Pass the address found above:
+The server **auto-detects the earbuds and connects on startup** — no MAC address
+needed. Detection matches the vendor control service the earbuds advertise (the BLE
+control endpoint shows up as a `QCY-APP` entry, under a different address than the
+paired audio MAC in `bluetoothctl devices`), and it keeps retrying in the background
+until they're reachable.
+
+To (re)connect manually, call `Connect` with an empty string to auto-detect:
 
 ```bash
-dbus-send --session --dest=tn.aziz.soundpeats.BLEService --print-reply /tn/aziz/soundpeats/BLEService tn.aziz.soundpeats.BLEService.Connect string:"AA:BB:CC:DD:EE:FF"
+dbus-send --session --dest=tn.aziz.soundpeats.BLEService --print-reply /tn/aziz/soundpeats/BLEService tn.aziz.soundpeats.BLEService.Connect string:""
 ```
 
-Alternatively, set `SOUNDPEATS_DEVICE=AA:BB:CC:DD:EE:FF` in the environment (e.g. via the
-`Environment=` line in `soundpeats.service`) and the server will connect automatically on startup.
+If you have several QCY/SoundPeats devices around, pin a specific one either by passing
+its address to `Connect` (`string:"AA:BB:CC:DD:EE:FF"`) or by setting
+`SOUNDPEATS_DEVICE=AA:BB:CC:DD:EE:FF` in the environment (e.g. the `Environment=` line in
+`soundpeats.service`). Use `Detect` to print the auto-detected address, or `Scan` to list
+all advertising BLE devices.
 
 #### get battery level
 

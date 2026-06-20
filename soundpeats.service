@@ -6,7 +6,9 @@ After=network.target
 ExecStart=/usr/local/bin/soundpeats
 Restart=on-failure
 Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus
-# Set your earbuds' MAC address to auto-connect on startup (find it with `bluetoothctl devices`).
+# The earbuds are auto-detected and connected on startup. Optionally pin a
+# specific device (if several QCY/SoundPeats are around) with its control
+# address (see the Detect/Scan methods):
 # Environment=SOUNDPEATS_DEVICE=AA:BB:CC:DD:EE:FF
 
 [Install]

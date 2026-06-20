@@ -15,6 +15,13 @@ logger = logging.getLogger(__name__)
 
 SERVICE = None
 
+# Vendor GATT service the control protocol talks to. The earbuds also advertise
+# it, so we use it to auto-detect them without a preconfigured MAC address.
+CONTROL_SERVICE_UUID = "0000a001-0000-1000-8000-00805f9b34fb"
+# Fallback hint: the control endpoint advertises as e.g. "QCY-APP" (QCY makes
+# SoundPeats and shares firmware).
+NAME_HINTS = ("qcy", "soundpeats")
+
 
 class CommandsEnum(enum.IntEnum):
     ANCSETTING = 23
@@ -50,9 +57,37 @@ async def get_service(client: BleakClient):
     global SERVICE
     if SERVICE:
         return SERVICE
-    service_uuid = "0000a001-0000-1000-8000-00805f9b34fb"
-    (SERVICE,) = (s for s in client.services if s.uuid == service_uuid)
+    (SERVICE,) = (s for s in client.services if s.uuid == CONTROL_SERVICE_UUID)
     return SERVICE
+
+
+async def discover_earbuds(address=None, timeout=10.0):
+    """Find the earbuds' BLE control endpoint.
+
+    With an address, match it exactly. Otherwise auto-detect: pick the
+    strongest-signal device whose advertisement carries the vendor control
+    service (or a QCY/SoundPeats name). Returns a BLEDevice, or None.
+    """
+    matches = {}  # address -> (BLEDevice, rssi)
+
+    def callback(device, adv):
+        if address is not None:
+            if device.address.casefold() == address.casefold():
+                matches[device.address] = (device, adv.rssi)
+            return
+        uuids = {u.casefold() for u in adv.service_uuids}
+        name = (adv.local_name or device.name or "").casefold()
+        if CONTROL_SERVICE_UUID in uuids or any(h in name for h in NAME_HINTS):
+            matches[device.address] = (device, adv.rssi)
+
+    scanner = BleakScanner(detection_callback=callback)
+    await scanner.start()
+    await asyncio.sleep(timeout)
+    await scanner.stop()
+    if not matches:
+        return None
+    device, _ = max(matches.values(), key=lambda m: m[1])
+    return device
 
 
 def pack_data_to_send(*bArr):
@@ -134,25 +169,27 @@ class BLEService(ServiceInterface):
         self.device_address = None
         self.loop = None
 
-    async def connect(self, address, retry_forever=False):
-        """Connect to a device.
+    async def connect(self, address=None, retry_forever=False):
+        """Connect to the earbuds.
 
-        With retry_forever=True keep retrying every 5s (used for startup
-        auto-connect and background reconnects). Otherwise make a single attempt
-        and return whether it succeeded, so an explicit Connect call doesn't
-        block forever on an unreachable device.
+        With an address, connect to that specific device; with no address,
+        auto-detect the control endpoint by its advertised vendor service. With
+        retry_forever=True keep retrying every 5s (startup auto-connect and
+        background reconnects); otherwise make a single attempt.
         """
-        self.device_address = address
+        global SERVICE
         self.loop = asyncio.get_running_loop()
         while True:
             try:
-                logger.info(f"Connecting to device: {address}")
-                # Resolve the advertising device first (the recommended bleak
-                # pattern): connecting to a bare address makes connect() do its
-                # own discovery, which is slow and flaky.
-                device = await BleakScanner.find_device_by_address(address, timeout=10.0)
+                logger.info("Looking for earbuds: %s", address or "(auto-detect)")
+                device = await discover_earbuds(address)
                 if device is None:
-                    raise Exception(f"{address} not found (not advertising BLE)")
+                    raise Exception(
+                        f"{address} not found" if address else "no earbuds found"
+                    )
+                self.device_address = device.address
+                logger.info(f"Connecting to device: {device.address}")
+                SERVICE = None  # invalidate cached service for the new connection
                 self.client = BleakClient(
                     device, disconnected_callback=self.on_disconnect
                 )
@@ -271,22 +308,32 @@ class BLEService(ServiceInterface):
 
     @method()
     async def Connect(self, address: "s") -> "s":
-        # Connect in the background (retrying until the device is reachable) so
-        # the call never blocks forever. Wait briefly for a fast success;
-        # otherwise report that it's still connecting rather than hang past the
-        # D-Bus reply timeout. Poll GetBatteryLevel to confirm once connected.
-        if self.client and self.client.is_connected and self.device_address == address:
+        # Empty address => auto-detect the earbuds. Connects in the background
+        # (retrying) so the call never blocks forever; waits briefly for a fast
+        # success, otherwise reports it's still connecting. Poll GetBatteryLevel
+        # to confirm once connected.
+        target = address or None
+        if self.client and self.client.is_connected and (
+            target is None or self.device_address == target
+        ):
             return "Connected"
-        self.device_address = address
         if self.reconnect_task and not self.reconnect_task.done():
             self.reconnect_task.cancel()
         self.reconnect_task = asyncio.create_task(
-            self.connect(address, retry_forever=True)
+            self.connect(target, retry_forever=True)
         )
         await asyncio.wait({self.reconnect_task}, timeout=18)
         if self.client and self.client.is_connected:
             return "Connected"
-        return f"Still connecting to {address} in the background"
+        return "Still connecting in the background"
+
+    @method()
+    async def Detect(self) -> "s":
+        # Auto-detect the earbuds' control address without connecting.
+        device = await discover_earbuds()
+        if device is None:
+            raise Exception("No SoundPeats/QCY earbuds found")
+        return device.address
 
     @method()
     async def Scan(self) -> "a{ss}":
@@ -346,13 +393,13 @@ async def main():
     await bus.request_name("tn.aziz.soundpeats.BLEService")
     logger.info("D-Bus service started")
 
-    # Auto-connect on startup if a device address is provided, so the service
-    # is usable right after boot without a manual Connect call. Run it as a
-    # background task so the D-Bus interface stays responsive while it retries.
-    address = os.environ.get("SOUNDPEATS_DEVICE")
-    if address:
-        logger.info("Auto-connecting to %s from $SOUNDPEATS_DEVICE", address)
-        asyncio.create_task(service.connect(address, retry_forever=True))
+    # Auto-connect on startup so the service is usable right after boot. By
+    # default the earbuds are auto-detected by their advertised vendor service;
+    # SOUNDPEATS_DEVICE can pin a specific address if several QCY/SoundPeats
+    # devices are around. Run as a background task so D-Bus stays responsive.
+    address = os.environ.get("SOUNDPEATS_DEVICE") or None
+    logger.info("Auto-connecting to %s", address or "(auto-detecting earbuds)")
+    asyncio.create_task(service.connect(address, retry_forever=True))
 
     await asyncio.Future()
 
