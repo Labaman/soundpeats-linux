@@ -8,7 +8,7 @@ import re
 import subprocess
 
 from PyQt6.QtCore import QTimer
-from PyQt6.QtGui import QCursor, QIcon
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 DEST = "tn.aziz.soundpeats.BLEService"
@@ -58,8 +58,10 @@ class Tray(QSystemTrayIcon):
         menu.addSeparator()
         menu.addAction("Обновить", self.refresh)
         menu.addAction("Выход", QApplication.instance().quit)
+        # Refresh battery whenever the menu opens; Plasma shows the menu itself
+        # (manually popping it up fails on Wayland).
+        menu.aboutToShow.connect(self.refresh)
         self.setContextMenu(menu)
-        self.activated.connect(self.on_activated)
         self.setToolTip("SoundPeats")
         self.setVisible(True)
 
@@ -67,11 +69,6 @@ class Tray(QSystemTrayIcon):
         timer.timeout.connect(self.refresh)
         timer.start(60_000)
         self.refresh()
-
-    def on_activated(self, reason):
-        if reason == QSystemTrayIcon.ActivationReason.Trigger:
-            self.refresh()
-            self.contextMenu().popup(QCursor.pos())
 
     def set_mode(self, mode):
         call("SetNoiseMode", f"string:{mode}")
