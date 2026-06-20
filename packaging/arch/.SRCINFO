@@ -1,0 +1,19 @@
+pkgbase = soundpeats-linux-git
+	pkgdesc = D-Bus BLE daemon to control SoundPeats Capsule3 Pro (battery, ANC modes) on Linux
+	pkgver = r17.7eac2cc
+	pkgrel = 1
+	url = https://github.com/Labaman/soundpeats-linux
+	arch = any
+	license = MIT
+	makedepends = git
+	depends = python
+	depends = python-bleak
+	depends = python-dbus-next
+	depends = bluez
+	optdepends = zsh: battery-level prompt segment (see soundpeats.zsh)
+	provides = soundpeats-linux
+	conflicts = soundpeats-linux
+	source = git+https://github.com/Labaman/soundpeats-linux.git#branch=fix/bugs-and-autoconnect
+	sha256sums = SKIP
+
+pkgname = soundpeats-linux-git
