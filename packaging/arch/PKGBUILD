@@ -1,0 +1,35 @@
+# Maintainer: Mikhail Velichko <efklid@gmail.com>
+pkgname=soundpeats-linux-git
+pkgver=r16.0000000
+pkgrel=1
+pkgdesc="D-Bus BLE daemon to control SoundPeats Capsule3 Pro (battery, ANC modes) on Linux"
+arch=('any')
+url="https://github.com/Labaman/soundpeats-linux"
+license=('MIT')
+depends=('python' 'python-bleak' 'python-dbus-next' 'bluez')
+makedepends=('git')
+optdepends=('zsh: battery-level prompt segment (see soundpeats.zsh)')
+provides=('soundpeats-linux')
+conflicts=('soundpeats-linux')
+source=("git+https://github.com/Labaman/soundpeats-linux.git#branch=fix/bugs-and-autoconnect")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$srcdir/soundpeats-linux"
+  printf 'r%s.%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+package() {
+  cd "$srcdir/soundpeats-linux"
+
+  # Main daemon (has a /usr/bin/python shebang)
+  install -Dm755 server.py "$pkgdir/usr/bin/soundpeats"
+
+  # systemd *user* unit; rewrite the manual /usr/local path to the packaged one
+  sed 's|/usr/local/bin/soundpeats|/usr/bin/soundpeats|' soundpeats.service \
+    | install -Dm644 /dev/stdin "$pkgdir/usr/lib/systemd/user/soundpeats.service"
+
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 readme.md "$pkgdir/usr/share/doc/$pkgname/readme.md"
+  install -Dm644 soundpeats.zsh "$pkgdir/usr/share/doc/$pkgname/soundpeats.zsh"
+}
