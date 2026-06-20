@@ -1,12 +1,13 @@
 import asyncio
 import enum
+import os
 from typing import Optional
 from bleak import BleakClient
 import binascii
 import logging
 
 
-DEVICE_ADDRESS = "C4:AC:60:E0:75:95"
+DEVICE_ADDRESS = os.environ.get("SOUNDPEATS_DEVICE", "C4:AC:60:E0:75:95")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 SERVICE = None
@@ -129,8 +130,13 @@ class DataBean:
     def get_data_bean(i: int, b_arr: Optional[bytearray]):
         # This method should be implemented to return the appropriate instance
         # based on the value of 'i' and 'b_arr'.
+        try:
+            command = CommandsEnum(i)
+        except ValueError:
+            # Unknown command id: skip it instead of crashing the parse.
+            return None
         return {
-            "command": CommandsEnum(i),
+            "command": command,
             "data": b_arr,
         }
 

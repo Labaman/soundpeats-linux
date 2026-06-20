@@ -1,5 +1,6 @@
 import asyncio
 import enum
+import os
 from typing import Any, Dict, List, Optional
 from bleak import BleakClient
 import binascii
@@ -85,9 +86,16 @@ async def set_noise_mode(client: BleakClient, mode: NoiseMode):
 DataBeanType = Dict[str, Any]
 
 
-def get_data_bean(i: int, b_arr: Optional[bytearray]) -> DataBeanType:
+def get_data_bean(i: int, b_arr: Optional[bytearray]) -> Optional[DataBeanType]:
+    try:
+        command = CommandsEnum(i)
+    except ValueError:
+        # Unknown command id: the original app returns null here and skips it,
+        # so we do the same instead of crashing the whole parse.
+        logger.debug("Unknown command id %s, skipping", i)
+        return None
     return {
-        "command": CommandsEnum(i),
+        "command": command,
         "data": b_arr,
     }
 
@@ -123,17 +131,20 @@ class BLEService(ServiceInterface):
         self.client = None
         self.reconnect_task = None
         self.device_address = None
+        self.loop = None
 
     async def connect(self, address):
         self.device_address = address
+        self.loop = asyncio.get_running_loop()
         while True:
             try:
                 logger.info(f"Connecting to device: {address}")
-                self.client = BleakClient(address)
+                self.client = BleakClient(
+                    address, disconnected_callback=self.on_disconnect
+                )
                 await self.client.connect()
                 if self.client.is_connected:
                     logger.info(f"Connected: {self.client}")
-                    self.client.set_disconnected_callback(self.on_disconnect)
                     break
             except Exception as e:
                 logger.error(f"Connection failed: {e}")
@@ -142,7 +153,7 @@ class BLEService(ServiceInterface):
     def on_disconnect(self, client):
         logger.warning("Disconnected from device, attempting to reconnect...")
         if self.reconnect_task is None or self.reconnect_task.done():
-            loop = asyncio.get_event_loop()
+            loop = self.loop or asyncio.get_event_loop()
             self.reconnect_task = asyncio.run_coroutine_threadsafe(
                 self.connect(self.device_address), loop
             )
@@ -285,6 +296,15 @@ async def main():
     bus.export("/tn/aziz/soundpeats/BLEService", service)
     await bus.request_name("tn.aziz.soundpeats.BLEService")
     logger.info("D-Bus service started")
+
+    # Auto-connect on startup if a device address is provided, so the service
+    # is usable right after boot without a manual Connect call. Run it as a
+    # background task so the D-Bus interface stays responsive while it retries.
+    address = os.environ.get("SOUNDPEATS_DEVICE")
+    if address:
+        logger.info("Auto-connecting to %s from $SOUNDPEATS_DEVICE", address)
+        asyncio.create_task(service.connect(address))
+
     await asyncio.Future()
 
 

@@ -1,12 +1,13 @@
-[Unit]  
-Description=BLE Service for Soundepats Earbuds  
-After=network.target  
-  
-[Service]  
-ExecStart=/usr/local/bin/soundpeats
-Restart=on-failure 
-Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus  
+[Unit]
+Description=BLE Service for Soundpeats Earbuds
+After=network.target
 
-  
-[Install]  
-WantedBy=default.target  
+[Service]
+ExecStart=/usr/local/bin/soundpeats
+Restart=on-failure
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus
+# Set your earbuds' MAC address to auto-connect on startup (find it with `bluetoothctl devices`).
+# Environment=SOUNDPEATS_DEVICE=AA:BB:CC:DD:EE:FF
+
+[Install]
+WantedBy=default.target

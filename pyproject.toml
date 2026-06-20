@@ -3,12 +3,11 @@ name = "libsoundpeats"
 version = "0.1.0"
 description = ""
 authors = ["realazizk <me@aziz.tn>"]
-readme = "README.md"
+readme = "readme.md"
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.13"
 bleak = "^0.22.2"
-gattlib = "^0.20210616"
 dbus-next = "^0.2.3"
 
 [tool.poetry.group.dev.dependencies]

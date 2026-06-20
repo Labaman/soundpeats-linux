@@ -12,13 +12,23 @@ I only own a capsule3 pro, should support some QCY models, they have similar fir
 
 ### Commands
 
-Run the server. Set it to run as a systemd service or whatever.
+Run the server. Set it to run as a systemd **user** service or whatever:
+
+```bash
+cp soundpeats.service ~/.config/systemd/user/
+systemctl --user enable --now soundpeats.service
+```
 
 #### connect
 
+Pass your earbuds' MAC address (find it with `bluetoothctl devices`):
+
 ```bash
-dbus-send --session --dest=tn.aziz.soundpeats.BLEService --print-reply /tn/aziz/soundpeats/BLEService tn.aziz.soundpeats.BLEService.Connect
+dbus-send --session --dest=tn.aziz.soundpeats.BLEService --print-reply /tn/aziz/soundpeats/BLEService tn.aziz.soundpeats.BLEService.Connect string:"AA:BB:CC:DD:EE:FF"
 ```
+
+Alternatively, set `SOUNDPEATS_DEVICE=AA:BB:CC:DD:EE:FF` in the environment (e.g. via the
+`Environment=` line in `soundpeats.service`) and the server will connect automatically on startup.
 
 #### get battery level
 
