@@ -8,7 +8,8 @@ url="https://github.com/Labaman/soundpeats-linux"
 license=('MIT')
 depends=('python' 'python-bleak' 'python-dbus-next' 'bluez')
 makedepends=('git')
-optdepends=('zsh: battery-level prompt segment (see soundpeats.zsh)')
+optdepends=('zsh: battery-level prompt segment (see soundpeats.zsh)'
+            'python-pyqt6: system tray widget (soundpeats-tray)')
 provides=('soundpeats-linux')
 conflicts=('soundpeats-linux')
 source=("git+https://github.com/Labaman/soundpeats-linux.git#branch=fix/bugs-and-autoconnect")
@@ -24,6 +25,11 @@ package() {
 
   # Main daemon (has a /usr/bin/python shebang)
   install -Dm755 server.py "$pkgdir/usr/bin/soundpeats"
+
+  # Optional system tray widget (needs python-pyqt6)
+  install -Dm755 tray.py "$pkgdir/usr/bin/soundpeats-tray"
+  install -Dm644 soundpeats-tray.desktop \
+    "$pkgdir/usr/share/applications/soundpeats-tray.desktop"
 
   # systemd *user* unit; rewrite the manual /usr/local path to the packaged one
   sed 's|/usr/local/bin/soundpeats|/usr/bin/soundpeats|' soundpeats.service \

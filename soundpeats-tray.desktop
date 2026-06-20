@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=SoundPeats Tray
+Comment=Battery and noise-mode control for SoundPeats earbuds
+Exec=/usr/bin/soundpeats-tray
+Icon=audio-headphones
+Terminal=false
+Categories=Audio;Utility;

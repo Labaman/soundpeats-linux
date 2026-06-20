@@ -67,3 +67,9 @@ dbus-send --session --dest=tn.aziz.soundpeats.BLEService --print-reply /tn/aziz/
 # passthrough mode
 dbus-send --session --dest=tn.aziz.soundpeats.BLEService --print-reply /tn/aziz/soundpeats/BLEService tn.aziz.soundpeats.BLEService.SetNoiseMode string:"PASSTHROUGH"
 ```
+
+### Tray widget
+
+`soundpeats-tray` is an optional system-tray icon (needs `python-pyqt6`) showing
+battery and switching noise modes from a click menu. Run it, or autostart it with
+`cp /usr/share/applications/soundpeats-tray.desktop ~/.config/autostart/`.
