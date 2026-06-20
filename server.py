@@ -321,9 +321,13 @@ class BLEService(ServiceInterface):
         uuid = "00000008-0000-1000-8000-00805f9b34fb"
         out = await self.client.read_gatt_char(uuid)
         logger.info(f"Received: {out}, {binascii.hexlify(out)}")
+        # Bit 7 flags charging / in-case (e.g. 0xE4 == 100% + charging); the low
+        # 7 bits are the charge percentage. Without masking it reads as e.g. 228.
         return {
-            "left": out[0],
-            "right": out[1],
+            "left": out[0] & 0x7F,
+            "right": out[1] & 0x7F,
+            "charging_left": bool(out[0] & 0x80),
+            "charging_right": bool(out[1] & 0x80),
         }
 
     async def get_firmware_version(self):
@@ -357,7 +361,13 @@ class BLEService(ServiceInterface):
         return {
             "left": Variant("y", battery["left"]),
             "right": Variant("y", battery["right"]),
+            "charging_left": Variant("b", battery["charging_left"]),
+            "charging_right": Variant("b", battery["charging_right"]),
         }
+
+    @method()
+    async def IsConnected(self) -> "b":
+        return bool(self.client and self.client.is_connected)
 
     @method()
     async def Connect(self, address: "s") -> "s":

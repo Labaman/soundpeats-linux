@@ -1,17 +1,23 @@
 
 function get_battery_level() {
-  local output
-  output=$(dbus-send --session --dest=tn.aziz.soundpeats.BLEService --print-reply /tn/aziz/soundpeats/BLEService tn.aziz.soundpeats.BLEService.GetBatteryLevel 2>&1)
+  local dest=tn.aziz.soundpeats.BLEService
+  local path=/tn/aziz/soundpeats/BLEService
 
-  if [[ $output == *"Not connected"* ]]; then
+  local connected
+  connected=$(dbus-send --session --dest=$dest --print-reply $path $dest.IsConnected 2>/dev/null | awk '/boolean/ {print $NF}')
+  if [[ $connected != "true" ]]; then
     echo "disconnected"
     return
   fi
 
-  local left
-  local right
-  left=$(echo "$output" | awk '/string "left"/ {getline; print $3}')
-  right=$(echo "$output" | awk '/string "right"/ {getline; print $3}')
+  local output left right
+  output=$(dbus-send --session --dest=$dest --print-reply $path $dest.GetBatteryLevel 2>&1)
+  left=$(echo "$output"  | awk '/string "left"/  {getline; print $NF}')
+  right=$(echo "$output" | awk '/string "right"/ {getline; print $NF}')
+
+  # Append a bolt if that bud is charging / in the case.
+  [[ $(echo "$output" | awk '/string "charging_left"/  {getline; print $NF}') == "true" ]]  && left+="⚡"
+  [[ $(echo "$output" | awk '/string "charging_right"/ {getline; print $NF}') == "true" ]] && right+="⚡"
 
   echo "L: $left, R: $right"
 }
