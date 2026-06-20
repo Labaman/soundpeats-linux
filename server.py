@@ -73,21 +73,30 @@ async def discover_earbuds(address=None, timeout=10.0):
     service (or a QCY/SoundPeats name). Returns a BLEDevice, or None.
     """
     matches = {}  # address -> (BLEDevice, rssi, has_service)
+    found = asyncio.Event()  # set on a confident match to stop scanning early
 
     def callback(device, adv):
         if address is not None:
             if device.address.casefold() == address.casefold():
                 matches[device.address] = (device, adv.rssi, True)
+                found.set()
             return
         uuids = {u.casefold() for u in adv.service_uuids}
         name = (adv.local_name or device.name or "").casefold()
         has_service = CONTROL_SERVICE_UUID in uuids
         if has_service or any(h in name for h in NAME_HINTS):
             matches[device.address] = (device, adv.rssi, has_service)
+            if has_service:  # confident match — no need to keep scanning
+                found.set()
 
     scanner = BleakScanner(detection_callback=callback)
     await scanner.start()
-    await asyncio.sleep(timeout)
+    try:
+        # Return as soon as the control endpoint shows up (usually a second or
+        # two) instead of always waiting out the full timeout.
+        await asyncio.wait_for(found.wait(), timeout)
+    except asyncio.TimeoutError:
+        pass
     await scanner.stop()
     if not matches:
         return None
