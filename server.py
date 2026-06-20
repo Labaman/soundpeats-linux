@@ -254,7 +254,18 @@ class BLEService(ServiceInterface):
                     client = BleakClient(
                         device, disconnected_callback=self.on_disconnect
                     )
-                    await client.connect()
+                    # Bound the attempt: a healthy connect takes a few seconds,
+                    # but BlueZ occasionally hangs ~30s before failing. Abort
+                    # early and retry instead of waiting that out.
+                    try:
+                        await asyncio.wait_for(client.connect(), timeout=15)
+                    except BaseException:
+                        # Tear down a possibly half-open link before retrying.
+                        try:
+                            await client.disconnect()
+                        except Exception:
+                            pass
+                        raise
                     if client.is_connected:
                         self.client = client  # publish only once fully connected
                         logger.info(f"Connected: {client}")
@@ -265,7 +276,7 @@ class BLEService(ServiceInterface):
                 logger.error(f"Connection failed: {e}")
             if not retry_forever:
                 return False
-            await asyncio.sleep(5)
+            await asyncio.sleep(3)
 
     def on_disconnect(self, client):
         # Called from a bleak callback; hop onto the loop so the reconnect runs
