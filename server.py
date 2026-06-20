@@ -272,8 +272,10 @@ class BLEService(ServiceInterface):
                         if ALIAS:
                             await set_bluez_alias(self.device_address, ALIAS)
                         return True
+            except asyncio.TimeoutError:
+                logger.warning("Connection attempt timed out (>15s), retrying")
             except Exception as e:
-                logger.error(f"Connection failed: {e}")
+                logger.error("Connection failed: %s", e or type(e).__name__)
             if not retry_forever:
                 return False
             await asyncio.sleep(3)
